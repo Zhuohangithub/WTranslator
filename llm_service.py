@@ -42,6 +42,33 @@ def _parse_json_object(raw: str) -> Dict[str, Any]:
     return json.loads(text)
 
 
+def fetch_available_models(api_key: str, base_url: str) -> List[str]:
+    """从 OpenAI 兼容服务端 (/models) 在线拉取可用模型名称列表。"""
+    clean_url = (base_url or "https://api.deepseek.com/v1").strip().rstrip("/")
+    url = f"{clean_url}/models"
+    headers: Dict[str, str] = {"Accept": "application/json"}
+    if api_key and api_key.strip():
+        headers["Authorization"] = f"Bearer {api_key.strip()}"
+
+    with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        resp = client.get(url, headers=headers)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    items = payload.get("data", []) if isinstance(payload, dict) else []
+    models: List[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            mid = str(item.get("id") or item.get("name") or "").strip()
+            if mid and mid not in models:
+                models.append(mid)
+        elif isinstance(item, str) and item.strip() not in models:
+            models.append(item.strip())
+
+    models.sort()
+    return models
+
+
 class LLMService:
     """封装单词、短语判定、增量更新句子、长句翻译四个大模型接口。"""
 

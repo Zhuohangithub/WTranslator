@@ -332,3 +332,36 @@ def test_updater_version_comparison():
     assert is_newer_version("0.9.9", "1.0.0") is False
 
 
+def test_fetch_available_models_and_settings_combo():
+    import sys
+    from PySide6.QtWidgets import QApplication
+    import llm_service
+    from ui_review import SettingsDialog
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    with patch("llm_service.httpx.Client") as mock_client_cls:
+        mock_client = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "data": [
+                {"id": "deepseek-reasoner"},
+                {"id": "deepseek-chat"},
+            ]
+        }
+        mock_client.get.return_value = mock_resp
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        models = llm_service.fetch_available_models("sk-test", "https://api.deepseek.com/v1")
+        assert models == ["deepseek-chat", "deepseek-reasoner"]
+
+        dlg = SettingsDialog()
+        dlg.api_key_edit.setText("sk-test")
+        dlg.base_url_edit.setText("https://api.deepseek.com/v1")
+        with patch.object(dlg.model_combo, "showPopup"):
+            dlg._on_fetch_models()
+        items = [dlg.model_combo.itemText(i) for i in range(dlg.model_combo.count())]
+        assert items == ["deepseek-chat", "deepseek-reasoner"]
+
+
+

@@ -132,14 +132,14 @@ class FloatingTIcon(QWidget):
         path = QPainterPath()
         path.addRoundedRect(rect, 9, 9)
 
-        bg_color = QColor(37, 99, 235, 235) if self._hovered else QColor(30, 58, 138, 210)
+        bg_color = QColor(74, 98, 124, 235) if self._hovered else QColor(56, 74, 96, 210)
         painter.fillPath(path, bg_color)
 
-        pen = QPen(QColor(147, 197, 253, 190), 1.4)
+        pen = QPen(QColor(156, 176, 198, 180), 1.4)
         painter.setPen(pen)
         painter.drawPath(path)
 
-        painter.setPen(QColor(255, 255, 255))
+        painter.setPen(QColor(248, 250, 252))
         font = QFont("Georgia", 15, QFont.Weight.Bold)
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "T")
@@ -172,24 +172,24 @@ class TranslationPopup(QWidget):
         self.card.setStyleSheet(
             """
             QFrame#PopupCard {
-                background-color: #FFFFFF;
-                border: 1.5px solid #BFDBFE;
+                background-color: #F7F8FA;
+                border: 1.5px solid #9CB0C6;
                 border-radius: 12px;
             }
             QLabel {
-                color: #1E293B;
+                color: #27303F;
                 font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
             }
             QPushButton#ActionBtn {
-                background-color: #EFF6FF;
-                color: #1D4ED8;
-                border: 1px solid #BFDBFE;
+                background-color: #E6ECF2;
+                color: #3E5876;
+                border: 1px solid #B8C7D9;
                 border-radius: 6px;
                 padding: 3px 10px;
                 font-size: 12px;
             }
             QPushButton#ActionBtn:hover {
-                background-color: #DBEAFE;
+                background-color: #D8E2ED;
             }
             QPushButton#CloseBtn {
                 background: transparent;
@@ -200,7 +200,7 @@ class TranslationPopup(QWidget):
                 padding: 2px 6px;
             }
             QPushButton#CloseBtn:hover {
-                color: #EF4444;
+                color: #824646;
             }
             """
         )
@@ -213,13 +213,13 @@ class TranslationPopup(QWidget):
         # 顶部标题栏
         top_bar = QHBoxLayout()
         self.title_lbl = QLabel("WTranslator")
-        self.title_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #0F172A;")
+        self.title_lbl.setStyleSheet("font-size: 18px; font-weight: bold; color: #1E2530;")
         self.title_lbl.setWordWrap(True)
         top_bar.addWidget(self.title_lbl, 1)
 
         self.badge_lbl = QLabel("")
         self.badge_lbl.setStyleSheet(
-            "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #EFF6FF; color: #2563EB;"
+            "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E1E8F0; color: #3E5876;"
         )
         top_bar.addWidget(self.badge_lbl)
 
@@ -240,14 +240,14 @@ class TranslationPopup(QWidget):
 
         # 音标行
         self.phonetic_lbl = QLabel("")
-        self.phonetic_lbl.setStyleSheet("font-size: 13px; color: #475569;")
+        self.phonetic_lbl.setStyleSheet("font-size: 13px; color: #526071;")
         card_layout.addWidget(self.phonetic_lbl)
 
         # 超出句子词数上限提示框
         self.warning_lbl = QLabel("")
         self.warning_lbl.setWordWrap(True)
         self.warning_lbl.setStyleSheet(
-            "background-color: #FEF3C7; color: #92400E; border: 1px solid #F59E0B; "
+            "background-color: #EFECE4; color: #6E5931; border: 1px solid #B0935A; "
             "border-radius: 6px; padding: 6px 10px; font-size: 12px;"
         )
         self.warning_lbl.hide()
@@ -268,14 +268,14 @@ class TranslationPopup(QWidget):
 
         if ctx.sentence_over_limit:
             self.warning_lbl.setText(
-                f"⚠️ 所在句子超出词数上限（当前 {ctx.sentence_word_count} 词 > 上限 {ctx.sentence_limit} 词），"
+                f"所在句子超出词数上限（当前 {ctx.sentence_word_count} 词 > 上限 {ctx.sentence_limit} 词），"
                 "本次未向 AI 发送上下文句子。"
             )
             self.warning_lbl.show()
         else:
             self.warning_lbl.hide()
 
-        self.body_lbl.setText("⏳ 正在请求 AI 解析中，请稍候...")
+        self.body_lbl.setText("正在请求 AI 解析中，请稍候...")
         self.adjustSize()
         self._place_within_screen(pos)
         self.show()
@@ -285,9 +285,9 @@ class TranslationPopup(QWidget):
         if res.mode == "error":
             self.badge_lbl.setText("请求异常")
             self.badge_lbl.setStyleSheet(
-                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #FEE2E2; color: #DC2626;"
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #EDDEDE; color: #824646;"
             )
-            self.body_lbl.setText(f"❌ {res.error_msg}")
+            self.body_lbl.setText(res.error_msg)
             self.adjustSize()
             return
 
@@ -295,40 +295,40 @@ class TranslationPopup(QWidget):
 
         # 状态徽章
         if res.just_resurrected:
-            self.badge_lbl.setText("💛 又回来啦 (已激活黄框)")
+            self.badge_lbl.setText("又回来啦 (已激活黄框)")
             self.badge_lbl.setStyleSheet(
                 "font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 5px; "
-                "background: #FEF9C3; color: #B45309; border: 1px solid #FACC15;"
+                "background: #EDE5D3; color: #7D6435; border: 1px solid #B0935A;"
             )
         elif res.is_incremental:
-            self.badge_lbl.setText("🔄 增量更新句库")
+            self.badge_lbl.setText("增量更新句库")
             self.badge_lbl.setStyleSheet(
-                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #DCFCE7; color: #15803D;"
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E1E8F0; color: #3E5876;"
             )
         elif res.mode == "word":
-            self.badge_lbl.setText("📘 单词已入库")
+            self.badge_lbl.setText("单词已入库")
             self.badge_lbl.setStyleSheet(
-                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #EFF6FF; color: #1D4ED8;"
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E1E8F0; color: #3E5876;"
             )
         elif res.mode == "phrase":
-            self.badge_lbl.setText("📗 短语已入库")
+            self.badge_lbl.setText("短语已入库")
             self.badge_lbl.setStyleSheet(
-                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #EFF6FF; color: #1D4ED8;"
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E1E8F0; color: #3E5876;"
             )
         elif res.mode == "phrase_non_fixed":
-            self.badge_lbl.setText("📝 非固定短语 (不入库)")
+            self.badge_lbl.setText("非固定短语 (不入库)")
             self.badge_lbl.setStyleSheet(
-                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #F1F5F9; color: #475569;"
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E5E8EC; color: #526071;"
             )
         else:
-            self.badge_lbl.setText("📄 句段直译 (不入库)")
+            self.badge_lbl.setText("句段直译 (不入库)")
             self.badge_lbl.setStyleSheet(
-                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #F1F5F9; color: #475569;"
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E5E8EC; color: #526071;"
             )
 
         # 音标
         if res.phonetic:
-            self.phonetic_lbl.setText(f"🔊 {res.phonetic}")
+            self.phonetic_lbl.setText(res.phonetic)
             self.phonetic_lbl.show()
         else:
             self.phonetic_lbl.hide()
@@ -336,7 +336,7 @@ class TranslationPopup(QWidget):
         # 句子超出词上限提示
         if res.sentence_over_limit:
             self.warning_lbl.setText(
-                f"⚠️ 所在句子超出词数上限（当前 {res.sentence_word_count} 词 > 上限 {res.sentence_limit} 词），"
+                f"所在句子超出词数上限（当前 {res.sentence_word_count} 词 > 上限 {res.sentence_limit} 词），"
                 "未发送句子，仅展示词条释义。"
             )
             self.warning_lbl.show()
@@ -347,7 +347,7 @@ class TranslationPopup(QWidget):
         parts = []
         if res.mode in ("sentence", "phrase_non_fixed"):
             parts.append(
-                f"<div style='font-size:14px; color:#0F172A; margin-top:4px;'>"
+                f"<div style='font-size:14px; color:#1E2530; margin-top:4px;'>"
                 f"{html.escape(res.direct_translation)}</div>"
             )
         else:
@@ -360,7 +360,7 @@ class TranslationPopup(QWidget):
                     if pos and res.mode == "word":
                         meaning_lines.append(
                             f"<div style='margin-bottom:3px;'>"
-                            f"<span style='background:#DBEAFE; color:#1E40AF; padding:1px 5px; "
+                            f"<span style='background:#DDE5EE; color:#3E5876; padding:1px 5px; "
                             f"border-radius:4px; font-weight:bold; font-size:12px;'>{html.escape(pos)}</span> "
                             f"<span>{m_text}</span></div>"
                         )
@@ -373,17 +373,17 @@ class TranslationPopup(QWidget):
             # 句中用法与原句翻译
             if res.context_usage:
                 parts.append(
-                    f"<div style='margin-top:8px; padding:7px 9px; background:#F0F9FF; "
-                    f"border-left:3px solid #0284C7; border-radius:4px;'>"
-                    f"<b style='color:#0369A1;'>💡 句中用法：</b>{html.escape(res.context_usage)}</div>"
+                    f"<div style='margin-top:8px; padding:7px 9px; background:#EDF1F5; "
+                    f"border-left:3px solid #5B7A9C; border-radius:4px;'>"
+                    f"<b style='color:#3E5876;'>句中用法：</b>{html.escape(res.context_usage)}</div>"
                 )
             if res.sentence:
                 parts.append(
-                    f"<div style='margin-top:6px; padding:6px 9px; background:#F8FAFC; "
+                    f"<div style='margin-top:6px; padding:6px 9px; background:#F1F3F6; "
                     f"border-radius:4px; font-size:12px; color:#334155;'>"
                     f"<div><b>原句：</b>{html.escape(res.sentence)}</div>"
                     + (
-                        f"<div style='margin-top:3px; color:#475569;'><b>译文：</b>{html.escape(res.sentence_translation)}</div>"
+                        f"<div style='margin-top:3px; color:#526071;'><b>译文：</b>{html.escape(res.sentence_translation)}</div>"
                         if res.sentence_translation
                         else ""
                     )

@@ -20,9 +20,9 @@ def create_app_icon() -> QIcon:
 
     path = QPainterPath()
     path.addRoundedRect(QRect(4, 4, 56, 56), 14, 14)
-    painter.fillPath(path, QColor(37, 99, 235))
+    painter.fillPath(path, QColor(72, 99, 128))
 
-    painter.setPen(QColor(255, 255, 255))
+    painter.setPen(QColor(248, 250, 252))
     font = QFont("Georgia", 34, QFont.Weight.Bold)
     painter.setFont(font)
     painter.drawText(QRect(4, 4, 56, 56), Qt.AlignmentFlag.AlignCenter, "T")
@@ -59,21 +59,21 @@ class WTranslatorApp:
         self.tray.setToolTip("WTranslator - Word 划词翻译与英语复习助手")
 
         menu = QMenu()
-        open_act = QAction("📚 打开英语复习卡片库", menu)
+        open_act = QAction("打开英语复习卡片库", menu)
         open_act.triggered.connect(self.show_review_window)
         menu.addAction(open_act)
 
-        self.global_act = QAction("🌐 开启全局划词模式", menu)
+        self.global_act = QAction("开启全局划词模式", menu)
         self.global_act.setCheckable(True)
         self.global_act.setChecked(bool(load_config().get("global_mode", False)))
         self.global_act.triggered.connect(self._toggle_global_mode)
         menu.addAction(self.global_act)
 
-        settings_act = QAction("⚙️ 接口与词上限设置", menu)
+        settings_act = QAction("⚙ 接口与词上限设置", menu)
         settings_act.triggered.connect(self.review_window.open_settings)
         menu.addAction(settings_act)
 
-        update_act = QAction("🔄 检查在线更新", menu)
+        update_act = QAction("检查在线更新", menu)
         update_act.triggered.connect(self.review_window.open_update_dialog)
         menu.addAction(update_act)
 
