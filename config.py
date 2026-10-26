@@ -130,15 +130,24 @@ def get_db_path() -> Path:
 
 def migrate_data_dir(new_dir_str: str) -> Path:
     """
-    将数据库迁移至新的存储目录（若原目录存在 wtranslator.db 且新目录尚无，则自动复制过去）。
+    将数据库安全迁移至新的存储目录（使用 SQLite 原生 Online Backup API 完整拷贝主库与 WAL 日志）。
     """
+    import sqlite3
+
     old_db = get_db_path()
     target_dir = Path(new_dir_str.strip()) if new_dir_str.strip() else APP_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     new_db = target_dir.resolve() / "wtranslator.db"
 
     if old_db.exists() and old_db.resolve() != new_db.resolve() and not new_db.exists():
-        shutil.copy2(old_db, new_db)
+        src_conn = sqlite3.connect(old_db)
+        dst_conn = sqlite3.connect(new_db)
+        try:
+            with dst_conn:
+                src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+            src_conn.close()
 
     cfg = load_config().copy()
     cfg["data_dir"] = "" if target_dir.resolve() == APP_DIR.resolve() else str(target_dir.resolve())

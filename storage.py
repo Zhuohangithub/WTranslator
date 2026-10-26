@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -51,7 +52,7 @@ class VocabStorage:
     def db_path(self) -> Path:
         return self._explicit_db_path if self._explicit_db_path is not None else get_db_path()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self):
         current_path = self.db_path
         current_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(current_path)
@@ -62,7 +63,7 @@ class VocabStorage:
         if current_path not in self._initialized_paths:
             self._initialized_paths.add(current_path)
             self._ensure_schema(conn)
-        return conn
+        return closing(conn)
 
     def _init_db(self) -> None:
         with self._connect() as conn:
