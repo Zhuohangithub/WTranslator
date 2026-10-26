@@ -28,14 +28,18 @@ jobs:
 
       - name: Build Fast Directory Package with PyInstaller
         run: |
+          python -c "import config; config.ensure_app_ico()"
           pyinstaller --noconfirm --onedir --windowed `
             --name "WTranslator" `
+            --icon "app.ico" `
             --add-data "version.json;." `
+            --add-data "app.ico;." `
             --hidden-import "win32com.client" `
             --hidden-import "pythoncom" `
             --hidden-import "win32clipboard" `
             main.py
           Copy-Item "version.json" "dist/WTranslator/version.json" -Force
+          Copy-Item "app.ico" "dist/WTranslator/app.ico" -Force
           Copy-Item "install.bat" "dist/WTranslator/install.bat" -Force
           Compress-Archive -Path "dist/WTranslator/*" -DestinationPath "dist/WTranslator-Windows-Setup.zip" -Force
 
