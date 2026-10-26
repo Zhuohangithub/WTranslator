@@ -1,0 +1,14 @@
+# 忽略本地配置文件（防止泄漏 API Key）与本地生词数据库
+config.json
+wtranslator.db
+*.db-journal
+
+# Python 缓存与打包产物
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.spec
+WTranslator_new.exe
+_update_runner.bat

@@ -1,0 +1,15 @@
+{
+  "version": "1.0.0",
+  "changelog": "初始版本：支持 Word 隐形搜句划词翻译、短语 AI 判定、重复划词增量更新、蓝/红/黄三色英语复习卡片及在线自动更新。",
+  "files": [
+    "config.py",
+    "extractor.py",
+    "llm_service.py",
+    "storage.py",
+    "ui_floating.py",
+    "ui_review.py",
+    "updater.py",
+    "main.py",
+    "version.json"
+  ]
+}
