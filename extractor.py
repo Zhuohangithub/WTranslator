@@ -9,7 +9,6 @@ import win32clipboard
 import win32com.client
 import win32gui
 import win32process
-import psutil
 
 WORD_REGEX = re.compile(r"[A-Za-z]+(?:['’-][A-Za-z]+)*")
 
@@ -152,22 +151,38 @@ def extract_enclosing_sentence(
     return re.sub(r"\s+", " ", sentence)
 
 
-def get_foreground_process_name() -> str:
-    """获取当前前台活动窗口的进程名（小写，如 'winword.exe'）。"""
+def is_word_foreground() -> bool:
+    """
+    微秒级检查当前活动窗口是否为 Microsoft Word（或 WPS 文字）。
+    优先通过 Win32 窗口类名 'OpusApp' 零开销判定，回退到原生进程名查询。
+    """
     try:
         hwnd = win32gui.GetForegroundWindow()
         if not hwnd:
-            return ""
+            return False
+        cls_name = win32gui.GetClassName(hwnd)
+        if cls_name in ("OpusApp", "KWPSFrame"):
+            return True
+
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
-        return psutil.Process(pid).name().lower()
+        if not pid:
+            return False
+        h_proc = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+        if not h_proc:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(260)
+            size = ctypes.c_ulong(260)
+            if ctypes.windll.kernel32.QueryFullProcessImageNameW(
+                h_proc, 0, buf, ctypes.byref(size)
+            ):
+                exe_name = buf.value.rsplit("\\", 1)[-1].lower()
+                return exe_name in ("winword.exe", "wps.exe")
+        finally:
+            ctypes.windll.kernel32.CloseHandle(h_proc)
     except Exception:
-        return ""
-
-
-def is_word_foreground() -> bool:
-    """检查当前活动窗口是否为 Microsoft Word（或 WPS 文字）。"""
-    proc = get_foreground_process_name()
-    return proc in ("winword.exe", "wps.exe")
+        pass
+    return False
 
 
 def has_word_selection_fast() -> bool:

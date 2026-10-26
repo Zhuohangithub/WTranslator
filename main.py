@@ -1,10 +1,48 @@
+import importlib.machinery
+import importlib.util
+import os
+from pathlib import Path
 import sys
+
+
+def _enable_hot_reload_from_app_dir() -> None:
+    """
+    在 PyInstaller 打包后的 .exe 运行时，若安装目录下存在通过『在线更新』拉取的最新 .py 模块，
+    优先加载安装目录中的最新代码，从而实现免下载大体积 EXE 的秒级热更新。
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    app_dir = Path(sys.executable).resolve().parent
+    hot_modules = (
+        "config",
+        "storage",
+        "extractor",
+        "llm_service",
+        "updater",
+        "ui_floating",
+        "ui_review",
+    )
+    for mod_name in hot_modules:
+        py_file = app_dir / f"{mod_name}.py"
+        if py_file.exists():
+            try:
+                loader = importlib.machinery.SourceFileLoader(mod_name, str(py_file))
+                spec = importlib.util.spec_from_loader(mod_name, loader)
+                if spec is not None:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules[mod_name] = mod
+                    loader.exec_module(mod)
+            except Exception:
+                sys.modules.pop(mod_name, None)
+
+
+_enable_hot_reload_from_app_dir()
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QIcon, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
-from config import load_config, save_config
+from config import create_desktop_shortcut, load_config, save_config
 from extractor import SelectionContext
 from storage import VocabStorage
 from ui_floating import SelectionCoordinator, TranslationWorker
@@ -36,6 +74,7 @@ class WTranslatorApp:
     def __init__(self) -> None:
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
+        self.app.aboutToQuit.connect(self.fast_quit)
         self.icon = create_app_icon()
         self.app.setWindowIcon(self.icon)
 
@@ -78,13 +117,28 @@ class WTranslatorApp:
         menu.addAction(update_act)
 
         menu.addSeparator()
+        shortcut_act = QAction("在桌面创建快捷方式", menu)
+        shortcut_act.triggered.connect(lambda: create_desktop_shortcut())
+        menu.addAction(shortcut_act)
+
         quit_act = QAction("退出程序", menu)
-        quit_act.triggered.connect(self.app.quit)
+        quit_act.triggered.connect(self.fast_quit)
         menu.addAction(quit_act)
 
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self._on_tray_activated)
         self.tray.show()
+
+    def fast_quit(self) -> None:
+        """零延迟快速退出（立即停止轮询定时器与托盘图标，规避 COM 跨线程析构阻塞）。"""
+        try:
+            self.coordinator._poll_timer.stop()
+            self.coordinator.t_icon.hide()
+            self.coordinator.popup.hide()
+            self.tray.hide()
+        except Exception:
+            pass
+        os._exit(0)
 
     def _toggle_global_mode(self, checked: bool) -> None:
         cfg = load_config()

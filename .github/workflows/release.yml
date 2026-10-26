@@ -1,4 +1,4 @@
-name: Build and Release Windows EXE
+name: Build and Release Windows Package
 
 on:
   push:
@@ -24,27 +24,30 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install PySide6 pywin32 httpx pyinstaller
 
-      - name: Build WTranslator.exe with PyInstaller
+      - name: Build Fast Directory Package with PyInstaller
         run: |
-          pyinstaller --noconfirm --onefile --windowed `
+          pyinstaller --noconfirm --onedir --windowed `
             --name "WTranslator" `
             --add-data "version.json;." `
             --hidden-import "win32com.client" `
             --hidden-import "pythoncom" `
             --hidden-import "win32clipboard" `
             main.py
+          Copy-Item "version.json" "dist/WTranslator/version.json" -Force
+          Copy-Item "install.bat" "dist/WTranslator/install.bat" -Force
+          Compress-Archive -Path "dist/WTranslator/*" -DestinationPath "dist/WTranslator-Windows-Setup.zip" -Force
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WTranslator-Windows-EXE
-          path: dist/WTranslator.exe
+          name: WTranslator-Windows-Setup
+          path: dist/WTranslator-Windows-Setup.zip
 
       - name: Publish to GitHub Release (on Tag)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/WTranslator.exe
+          files: dist/WTranslator-Windows-Setup.zip
           generate_release_notes: true

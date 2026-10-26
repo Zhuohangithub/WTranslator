@@ -1,8 +1,8 @@
 @echo off
 cd /d "%~dp0"
 
-if exist "dist\WTranslator.exe" (
-    start "" "dist\WTranslator.exe"
+if exist "dist\WTranslator\WTranslator.exe" (
+    start "" "dist\WTranslator\WTranslator.exe"
     exit /b 0
 )
 

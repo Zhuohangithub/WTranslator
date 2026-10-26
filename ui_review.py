@@ -1,4 +1,6 @@
 import html
+import os
+from pathlib import Path
 import re
 from typing import Any, Callable, Dict, Optional
 
@@ -8,6 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -22,7 +25,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import PROVIDER_PRESETS, get_current_version, load_config, save_config
+from config import (
+    APP_DIR,
+    PROVIDER_PRESETS,
+    create_desktop_shortcut,
+    get_current_version,
+    get_data_dir,
+    load_config,
+    migrate_data_dir,
+    save_config,
+)
 from extractor import SelectionContext, classify_selection, count_words
 from llm_service import fetch_available_models
 from storage import VocabStorage
@@ -418,6 +430,42 @@ class SettingsDialog(QDialog):
         self.repo_edit.setPlaceholderText("用户名/仓库名，如 Zhuohangithub/WTranslator")
         form.addRow("GitHub 更新源：", self.repo_edit)
 
+        # 数据存储目录选择（默认安装目录）
+        data_row = QHBoxLayout()
+        data_row.setSpacing(6)
+        self.data_dir_edit = QLineEdit(str(get_data_dir()))
+        self.data_dir_edit.setPlaceholderText(f"留空则默认在安装目录：{APP_DIR}")
+        data_row.addWidget(self.data_dir_edit, 1)
+
+        browse_btn = QPushButton("选择目录")
+        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        browse_btn.setStyleSheet(
+            "background: #E6ECF2; color: #3A526E; border: 1px solid #9CB0C6; "
+            "padding: 4px 8px; border-radius: 5px; font-size: 12px;"
+        )
+        browse_btn.clicked.connect(self._on_browse_data_dir)
+        data_row.addWidget(browse_btn)
+
+        open_dir_btn = QPushButton("打开目录")
+        open_dir_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_dir_btn.setStyleSheet(
+            "background: #ECEFF3; color: #3B4756; border: 1px solid #CBD2DC; "
+            "padding: 4px 8px; border-radius: 5px; font-size: 12px;"
+        )
+        open_dir_btn.clicked.connect(self._on_open_data_dir)
+        data_row.addWidget(open_dir_btn)
+        form.addRow("数据存储目录：", data_row)
+
+        # 桌面快捷方式
+        shortcut_btn = QPushButton("在桌面生成快捷方式")
+        shortcut_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        shortcut_btn.setStyleSheet(
+            "background: #E6ECF2; color: #3A526E; border: 1px solid #9CB0C6; "
+            "padding: 5px 12px; border-radius: 5px; font-size: 12px;"
+        )
+        shortcut_btn.clicked.connect(self._on_create_shortcut)
+        form.addRow("桌面快捷方式：", shortcut_btn)
+
         layout.addLayout(form)
 
         btn_row = QHBoxLayout()
@@ -432,6 +480,28 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(save_btn)
         layout.addLayout(btn_row)
+
+    def _on_browse_data_dir(self) -> None:
+        chosen = QFileDialog.getExistingDirectory(
+            self, "选择生词数据库存储目录", self.data_dir_edit.text().strip() or str(APP_DIR)
+        )
+        if chosen:
+            self.data_dir_edit.setText(str(Path(chosen).resolve()))
+
+    def _on_open_data_dir(self) -> None:
+        target = Path(self.data_dir_edit.text().strip() or str(get_data_dir()))
+        target.mkdir(parents=True, exist_ok=True)
+        try:
+            os.startfile(str(target))
+        except Exception as exc:
+            QMessageBox.warning(self, "提示", f"无法打开目录：{exc}")
+
+    def _on_create_shortcut(self) -> None:
+        ok, info = create_desktop_shortcut()
+        if ok:
+            QMessageBox.information(self, "成功", f"已在桌面生成快捷方式：\n{info}")
+        else:
+            QMessageBox.warning(self, "失败", f"创建快捷方式失败：{info}")
 
     def _on_preset_changed(self, name: str) -> None:
         preset = PROVIDER_PRESETS.get(name)
@@ -474,7 +544,10 @@ class SettingsDialog(QDialog):
             self.fetch_models_btn.setText("拉取模型列表")
 
     def _on_save(self) -> None:
-        cfg = load_config()
+        new_data_dir = self.data_dir_edit.text().strip()
+        if new_data_dir:
+            migrate_data_dir(new_data_dir)
+        cfg = load_config().copy()
         cfg["api_key"] = self.api_key_edit.text().strip()
         cfg["base_url"] = self.base_url_edit.text().strip()
         cfg["model"] = self.model_combo.currentText().strip()
@@ -866,7 +939,8 @@ class ReviewMainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         dlg = SettingsDialog(self)
-        dlg.exec()
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.reload_cards()
 
     def open_update_dialog(self) -> None:
         dlg = UpdateDialog(self)

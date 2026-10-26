@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 from typing import List, Optional, Tuple
@@ -53,7 +52,7 @@ def _fetch_url_bytes(urls: List[str], timeout: float = 15.0) -> bytes:
 def check_for_updates(
     repo: Optional[str] = None, branch: Optional[str] = None
 ) -> UpdateInfo:
-    """检查 GitHub 仓库的 version.json 与 Releases 最新版本。"""
+    """检查 GitHub 仓库的 version.json 最新版本。"""
     cfg = load_config()
     repo = (repo or cfg.get("github_repo") or "Zhuohangithub/WTranslator").strip("/")
     branch = (branch or cfg.get("github_branch") or "main").strip()
@@ -71,16 +70,12 @@ def check_for_updates(
         changelog = str(data.get("changelog") or "")
         files = list(data.get("files") or [])
 
-        exe_url = (
-            f"https://github.com/{repo}/releases/latest/download/WTranslator.exe"
-        )
         has_upd = is_newer_version(remote_ver, local_ver)
         return UpdateInfo(
             has_update=has_upd,
             local_version=local_ver,
             remote_version=remote_ver,
             changelog=changelog,
-            exe_url=exe_url,
             files=files,
         )
     except Exception as exc:
@@ -98,9 +93,9 @@ def apply_online_update(
     branch: Optional[str] = None,
 ) -> Tuple[bool, str]:
     """
-    执行在线更新：
-    - 若当前为 PyInstaller 打包后的 .exe 环境：下载最新 WTranslator.exe 并通过自替换脚本更新重启；
-    - 若当前为源码/便携环境：优先通过 git pull 或 GitHub Raw 拉取最新代码文件并重启（保留数据库与配置）。
+    秒级在线热更新（兼容打包后的 WTranslator.exe 与源码环境）：
+    直接从 GitHub 拉取最新的核心业务模块到安装目录，无需重新下载几十 MB 的完整包，
+    重启后 WTranslator.exe 会自动优先加载安装目录下的最新热更新模块（数据库与配置完全保留）。
     """
     cfg = load_config()
     repo = (repo or cfg.get("github_repo") or "Zhuohangithub/WTranslator").strip("/")
@@ -111,45 +106,15 @@ def apply_online_update(
         if info.error:
             return False, info.error
 
-    # 模式 1：独立 .exe 自更新
-    if getattr(sys, "frozen", False):
-        exe_urls = [
-            f"https://github.com/{repo}/releases/latest/download/WTranslator.exe",
-            f"https://mirror.ghproxy.com/https://github.com/{repo}/releases/latest/download/WTranslator.exe",
-        ]
-        try:
-            exe_bytes = _fetch_url_bytes(exe_urls, timeout=60.0)
-            new_exe = APP_DIR / "WTranslator_new.exe"
-            new_exe.write_bytes(exe_bytes)
-
-            cur_exe = Path(sys.executable).resolve()
-            bat_path = APP_DIR / "_update_runner.bat"
-            bat_content = (
-                "@echo off\r\n"
-                "timeout /t 2 /nobreak >nul\r\n"
-                f'move /y "{new_exe}" "{cur_exe}" >nul\r\n'
-                f'start "" "{cur_exe}"\r\n'
-                'del "%~f0"\r\n'
-            )
-            bat_path.write_text(bat_content, encoding="mbcs", errors="ignore")
-            subprocess.Popen(
-                ["cmd.exe", "/c", str(bat_path)],
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            return True, "新版本 EXE 下载完成，即将自动替换并重启！"
-        except Exception as exc:
-            return False, f"下载或替换 EXE 失败：{exc}"
-
-    # 模式 2：源码/轻量桌面端热更新（秒级同步最新修复）
     try:
         files_to_sync = info.files or [
             "config.py",
+            "storage.py",
             "extractor.py",
             "llm_service.py",
-            "storage.py",
+            "updater.py",
             "ui_floating.py",
             "ui_review.py",
-            "updater.py",
             "main.py",
             "version.json",
         ]
@@ -162,16 +127,16 @@ def apply_online_update(
             target = APP_DIR / fname
             target.write_bytes(content)
 
-        return True, f"已成功从 GitHub ({repo}) 同步最新代码 (v{info.remote_version})！"
+        return True, f"已从 GitHub ({repo}) 同步最新版本 (v{info.remote_version})！"
     except Exception as exc:
-        return False, f"在线热更新失败：{exc}"
+        return False, f"在线更新失败：{exc}"
 
 
 def restart_application() -> None:
-    """重启当前桌面端进程。"""
+    """零延迟重启当前桌面端进程。"""
     if getattr(sys, "frozen", False):
-        subprocess.Popen([sys.executable])
+        subprocess.Popen([sys.executable], cwd=str(APP_DIR))
     else:
         main_script = str(APP_DIR / "main.py")
-        subprocess.Popen([sys.executable, main_script])
+        subprocess.Popen([sys.executable, main_script], cwd=str(APP_DIR))
     os._exit(0)

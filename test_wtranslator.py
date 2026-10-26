@@ -364,4 +364,33 @@ def test_fetch_available_models_and_settings_combo():
         assert items == ["deepseek-chat", "deepseek-reasoner"]
 
 
+def test_custom_data_dir_migration(tmp_path: Path, monkeypatch):
+    import config
+    from storage import VocabStorage
+
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    dir_a.mkdir()
+    dir_b.mkdir()
+
+    monkeypatch.setattr(config, "APP_DIR", dir_a)
+    monkeypatch.setattr(config, "CONFIG_PATH", dir_a / "config.json")
+    config._CONFIG_CACHE = None
+
+    store = VocabStorage()
+    store.save_new_vocab(
+        term="resilient",
+        term_type="word",
+        phonetic="/rɪˈzɪl.i.ənt/",
+        meanings=[{"pos": "adj.", "meaning": "有韧性的；能迅速恢复的"}],
+    )
+    assert (dir_a / "wtranslator.db").exists()
+
+    new_db = config.migrate_data_dir(str(dir_b))
+    assert new_db == (dir_b / "wtranslator.db").resolve()
+    assert new_db.exists()
+    assert store.get_by_term("resilient") is not None
+
+
+
 

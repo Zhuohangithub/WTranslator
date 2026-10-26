@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from config import APP_DIR
+from config import APP_DIR, get_db_path
 
 DB_PATH = APP_DIR / "wtranslator.db"
 OVERDUE_DAYS = 7.0  # 超过 7 天（一周）未复习标红
@@ -42,18 +42,34 @@ def format_elapsed(seconds: float) -> str:
 class VocabStorage:
     """管理生词、短语、历史例句及复习卡片状态机的 SQLite 存储层。"""
 
-    def __init__(self, db_path: Path = DB_PATH) -> None:
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[Path] = None) -> None:
+        self._explicit_db_path = db_path
+        self._initialized_paths: set[Path] = set()
         self._init_db()
 
+    @property
+    def db_path(self) -> Path:
+        return self._explicit_db_path if self._explicit_db_path is not None else get_db_path()
+
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        current_path = self.db_path
+        current_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(current_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        if current_path not in self._initialized_paths:
+            self._initialized_paths.add(current_path)
+            self._ensure_schema(conn)
         return conn
 
     def _init_db(self) -> None:
         with self._connect() as conn:
-            conn.executescript(
+            self._ensure_schema(conn)
+
+    def _ensure_schema(self, conn: sqlite3.Connection) -> None:
+        conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS vocab (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
