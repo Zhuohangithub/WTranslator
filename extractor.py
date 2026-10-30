@@ -232,6 +232,13 @@ def _extract_from_word_com() -> Optional[Tuple[str, str]]:
             extracted = extract_enclosing_sentence(raw_para, rel_start, rel_end)
             if extracted and selected_text.lower() in extracted.lower():
                 sentence = clean_text(extracted)
+            elif raw_para and selected_text.lower() in raw_para.lower():
+                idx = raw_para.lower().find(selected_text.lower())
+                extracted = extract_enclosing_sentence(
+                    raw_para, idx, idx + len(selected_text)
+                )
+                if extracted:
+                    sentence = clean_text(extracted)
         except Exception:
             pass
 
@@ -313,13 +320,16 @@ def _extract_from_clipboard() -> Optional[Tuple[str, str]]:
 
 
 def capture_selection(
-    sentence_word_limit: int = 50, global_mode: bool = False
+    sentence_word_limit: int = 50,
+    global_mode: bool = False,
+    for_correction: bool = False,
 ) -> Optional[SelectionContext]:
     """
     统一取词与隐形搜句入口：
     1. 若当前活动窗口是 Word，通过 Word COM 隐形获取选中词与整句；
     2. 若开启全局模式且当前活动窗口不是 Word，使用剪贴板安全取词；
     3. 检查所在句子是否超出词数上限（sentence_word_limit）。
+       在纠错模式 (for_correction=True) 下始终保留识别到的所在句子。
     """
     extracted = None
     source_app = "word"
@@ -338,6 +348,19 @@ def capture_selection(
 
     selected_text, full_sentence = extracted
     sel_type, word_cnt = classify_selection(selected_text)
+
+    if for_correction:
+        sent_word_cnt = count_words(full_sentence) if full_sentence else 0
+        return SelectionContext(
+            selected_text=selected_text,
+            selection_type=sel_type,
+            word_count=word_cnt,
+            sentence=full_sentence,
+            sentence_word_count=sent_word_cnt,
+            sentence_over_limit=False,
+            sentence_limit=sentence_word_limit,
+            source_app=source_app,
+        )
 
     if sel_type == "sentence":
         # 句子或段落模式直接翻译选中内容本身

@@ -2,6 +2,7 @@ import ctypes
 from ctypes import wintypes
 import html
 import math
+import re
 import time
 from typing import Callable, Optional
 
@@ -45,7 +46,7 @@ def _set_no_activate(hwnd: int) -> None:
 
 
 class TranslationWorker(QThread):
-    """后台异步执行 AI 查询与数据库存储，避免阻塞界面。"""
+    """后台异步执行 AI 查询与数据库存储（或纠错分析），避免阻塞界面。"""
 
     finished_result = Signal(object)
 
@@ -55,21 +56,28 @@ class TranslationWorker(QThread):
         storage: VocabStorage,
         cfg: dict,
         parent: Optional[QWidget] = None,
+        mode: str = "translate",
     ) -> None:
         super().__init__(parent)
         self.ctx = ctx
         self.storage = storage
         self.cfg = cfg
+        self.mode = mode
 
     def run(self) -> None:
-        result = process_selection(self.ctx, self.storage, self.cfg)
+        result = process_selection(self.ctx, self.storage, self.cfg, mode=self.mode)
         self.finished_result.emit(result)
 
 
 class FloatingTIcon(QWidget):
-    """划词后浮现的半透明 'T' 字图标，点击后触发翻译。"""
+    """
+    划词后浮现的双按钮半透明悬浮框：
+    - 左侧（原蓝灰半透明框 'T'）：点击触发查词翻译与生词入库；
+    - 右侧（橙色半透明框 'C'）：点击触发纠错模式（自动识别所在句子、判断是否合适并给出可替代词，不入单词本）。
+    """
 
     clicked = Signal(QPoint)
+    correction_clicked = Signal(QPoint)
 
     def __init__(self) -> None:
         super().__init__(
@@ -81,10 +89,15 @@ class FloatingTIcon(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setFixedSize(36, 36)
+        self.setMouseTracking(True)
+        self.setFixedSize(74, 36)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hovered = False
+        self._hovered_part: Optional[str] = None  # 'translate' | 'correction' | None
         self._base_opacity = 0.78
+
+        self._left_rect = QRect(2, 2, 32, 32)
+        self._right_rect = QRect(40, 2, 32, 32)
 
         self._auto_hide_timer = QTimer(self)
         self._auto_hide_timer.setSingleShot(True)
@@ -92,6 +105,7 @@ class FloatingTIcon(QWidget):
 
     def show_near(self, global_pos: QPoint, opacity: float = 0.78) -> None:
         self._base_opacity = max(0.35, min(0.95, opacity))
+        self._hovered_part = None
         self.setWindowOpacity(self._base_opacity)
         # 偏移到鼠标右下方 14px，不遮挡正选中的文字
         target = QPoint(global_pos.x() + 14, global_pos.y() + 14)
@@ -110,16 +124,34 @@ class FloatingTIcon(QWidget):
 
     def leaveEvent(self, event) -> None:
         self._hovered = False
+        self._hovered_part = None
         self.setWindowOpacity(self._base_opacity)
         self._auto_hide_timer.start(2500)
         self.update()
         super().leaveEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:
+        pt = event.position().toPoint()
+        if self._right_rect.contains(pt):
+            new_part = "correction"
+        elif self._left_rect.contains(pt):
+            new_part = "translate"
+        else:
+            new_part = None
+        if new_part != self._hovered_part:
+            self._hovered_part = new_part
+            self.update()
+        super().mouseMoveEvent(event)
+
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            pt = event.position().toPoint()
             pos = self.pos()
             self.hide()
-            self.clicked.emit(pos)
+            if self._right_rect.contains(pt) or pt.x() >= 37:
+                self.correction_clicked.emit(pos)
+            else:
+                self.clicked.emit(pos)
             event.accept()
             return
         super().mousePressEvent(event)
@@ -127,22 +159,32 @@ class FloatingTIcon(QWidget):
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-
-        rect = QRect(2, 2, 32, 32)
-        path = QPainterPath()
-        path.addRoundedRect(rect, 9, 9)
-
-        bg_color = QColor(74, 98, 124, 235) if self._hovered else QColor(56, 74, 96, 210)
-        painter.fillPath(path, bg_color)
-
-        pen = QPen(QColor(156, 176, 198, 180), 1.4)
-        painter.setPen(pen)
-        painter.drawPath(path)
-
-        painter.setPen(QColor(248, 250, 252))
         font = QFont("Georgia", 15, QFont.Weight.Bold)
         painter.setFont(font)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "T")
+
+        # 1. 左侧：原版蓝灰半透明框 ('T' 翻译模式)
+        left_path = QPainterPath()
+        left_path.addRoundedRect(self._left_rect, 9, 9)
+        left_hover = self._hovered and (self._hovered_part in (None, "translate"))
+        left_bg = QColor(74, 98, 124, 235) if left_hover else QColor(56, 74, 96, 210)
+        painter.fillPath(left_path, left_bg)
+        painter.setPen(QPen(QColor(156, 176, 198, 180), 1.4))
+        painter.drawPath(left_path)
+        painter.setPen(QColor(248, 250, 252))
+        painter.drawText(self._left_rect, Qt.AlignmentFlag.AlignCenter, "T")
+
+        # 2. 右侧：橙色半透明框 ('C' 纠错模式)
+        right_path = QPainterPath()
+        right_path.addRoundedRect(self._right_rect, 9, 9)
+        right_hover = self._hovered and (self._hovered_part == "correction")
+        right_bg = (
+            QColor(235, 132, 52, 238) if right_hover else QColor(214, 112, 38, 210)
+        )
+        painter.fillPath(right_path, right_bg)
+        painter.setPen(QPen(QColor(248, 194, 145, 190), 1.4))
+        painter.drawPath(right_path)
+        painter.setPen(QColor(255, 250, 245))
+        painter.drawText(self._right_rect, Qt.AlignmentFlag.AlignCenter, "C")
 
 
 class TranslationPopup(QWidget):
@@ -260,22 +302,80 @@ class TranslationPopup(QWidget):
         self.body_lbl.setStyleSheet("font-size: 13px; line-height: 1.5;")
         card_layout.addWidget(self.body_lbl)
 
-    def show_loading(self, pos: QPoint, ctx: SelectionContext) -> None:
+    def _apply_card_theme(self, is_correction: bool) -> None:
+        border_col = "#D8965E" if is_correction else "#9CB0C6"
+        bg_col = "#FDF9F5" if is_correction else "#F7F8FA"
+        self.card.setStyleSheet(
+            f"""
+            QFrame#PopupCard {{
+                background-color: {bg_col};
+                border: 1.5px solid {border_col};
+                border-radius: 12px;
+            }}
+            QLabel {{
+                color: #27303F;
+                font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+            }}
+            QPushButton#ActionBtn {{
+                background-color: #E6ECF2;
+                color: #3E5876;
+                border: 1px solid #B8C7D9;
+                border-radius: 6px;
+                padding: 3px 10px;
+                font-size: 12px;
+            }}
+            QPushButton#ActionBtn:hover {{
+                background-color: #D8E2ED;
+            }}
+            QPushButton#CloseBtn {{
+                background: transparent;
+                color: #64748B;
+                border: none;
+                font-size: 15px;
+                font-weight: bold;
+                padding: 2px 6px;
+            }}
+            QPushButton#CloseBtn:hover {{
+                color: #824646;
+            }}
+            """
+        )
+
+    def show_loading(
+        self, pos: QPoint, ctx: SelectionContext, mode: str = "translate"
+    ) -> None:
+        is_corr = mode == "correction"
+        self._apply_card_theme(is_corr)
         self.title_lbl.setText(ctx.selected_text[:60])
-        type_names = {"word": "单词查询", "phrase": "短语鉴别", "sentence": "句段直译"}
-        self.badge_lbl.setText(type_names.get(ctx.selection_type, "翻译中"))
-        self.phonetic_lbl.hide()
 
-        if ctx.sentence_over_limit:
-            self.warning_lbl.setText(
-                f"所在句子超出词数上限（当前 {ctx.sentence_word_count} 词 > 上限 {ctx.sentence_limit} 词），"
-                "本次未向 AI 发送上下文句子。"
+        if is_corr:
+            self.badge_lbl.setText("纠错模式 (不入库)")
+            self.badge_lbl.setStyleSheet(
+                "font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 5px; "
+                "background: #F9E6D4; color: #9A4D18; border: 1px solid #DFB086;"
             )
-            self.warning_lbl.show()
-        else:
+            self.phonetic_lbl.hide()
             self.warning_lbl.hide()
+            self.body_lbl.setText("正在识别所在句子并评估用词与可替代词，请稍候...")
+        else:
+            type_names = {"word": "单词查询", "phrase": "短语鉴别", "sentence": "句段直译"}
+            self.badge_lbl.setText(type_names.get(ctx.selection_type, "翻译中"))
+            self.badge_lbl.setStyleSheet(
+                "font-size: 11px; padding: 2px 8px; border-radius: 5px; background: #E1E8F0; color: #3E5876;"
+            )
+            self.phonetic_lbl.hide()
 
-        self.body_lbl.setText("正在请求 AI 解析中，请稍候...")
+            if ctx.sentence_over_limit:
+                self.warning_lbl.setText(
+                    f"所在句子超出词数上限（当前 {ctx.sentence_word_count} 词 > 上限 {ctx.sentence_limit} 词），"
+                    "本次未向 AI 发送上下文句子。"
+                )
+                self.warning_lbl.show()
+            else:
+                self.warning_lbl.hide()
+
+            self.body_lbl.setText("正在请求 AI 解析中，请稍候...")
+
         self.adjustSize()
         self._place_within_screen(pos)
         self.show()
@@ -292,6 +392,97 @@ class TranslationPopup(QWidget):
             return
 
         self.title_lbl.setText(res.term[:80])
+
+        # 纠错模式专属渲染（不存入单词本）
+        if res.mode == "correction":
+            self._apply_card_theme(True)
+            self.badge_lbl.setText("纠错模式 (不入库)")
+            self.badge_lbl.setStyleSheet(
+                "font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 5px; "
+                "background: #F9E6D4; color: #9A4D18; border: 1px solid #DFB086;"
+            )
+            self.phonetic_lbl.hide()
+            self.warning_lbl.hide()
+
+            parts = []
+            # 1. 是否合适结论与详细分析
+            verdict_text = html.escape(
+                res.verdict or ("使用合适" if res.is_appropriate else "使用欠佳 / 建议替换")
+            )
+            analysis_text = html.escape(res.correction_analysis or "")
+            if res.is_appropriate:
+                v_bg, v_border, v_fg, v_icon = "#EBF5EE", "#4C8C68", "#2B6142", "✓"
+            else:
+                v_bg, v_border, v_fg, v_icon = "#FBECE4", "#C86D44", "#9A4220", "⚠"
+
+            parts.append(
+                f"<div style='margin-top:4px; padding:8px 10px; background:{v_bg}; "
+                f"border-left:3.5px solid {v_border}; border-radius:5px;'>"
+                f"<div style='font-weight:bold; color:{v_fg}; font-size:13px;'>"
+                f"{v_icon} 用词评估：{verdict_text}</div>"
+                + (
+                    f"<div style='margin-top:4px; color:#27303F; font-size:12.5px;'>{analysis_text}</div>"
+                    if analysis_text
+                    else ""
+                )
+                + "</div>"
+            )
+
+            # 2. 可替代词推荐（无论合适与否均展示）
+            alt_lines = []
+            for item in res.alternatives or []:
+                w = html.escape(str(item.get("word") or "").strip())
+                m = html.escape(str(item.get("meaning") or "").strip())
+                if not w:
+                    continue
+                if m:
+                    alt_lines.append(
+                        f"<div style='margin-top:4px;'>"
+                        f"<span style='background:#F6E3D2; color:#8C4212; padding:1px 6px; "
+                        f"border-radius:4px; font-weight:bold; font-size:12.5px;'>{w}</span> "
+                        f"<span style='color:#334155; font-size:12.5px;'>{m}</span></div>"
+                    )
+                else:
+                    alt_lines.append(
+                        f"<div style='margin-top:4px;'>"
+                        f"<span style='background:#F6E3D2; color:#8C4212; padding:1px 6px; "
+                        f"border-radius:4px; font-weight:bold; font-size:12.5px;'>{w}</span></div>"
+                    )
+            if alt_lines:
+                parts.append(
+                    f"<div style='margin-top:8px; padding:7px 10px; background:#FAF1E8; "
+                    f"border:1px solid #EBD4BE; border-radius:5px;'>"
+                    f"<div style='font-weight:bold; color:#9A4D18; font-size:12.5px;'>可替代词推荐：</div>"
+                    f"{''.join(alt_lines)}</div>"
+                )
+
+            # 3. 自动识别的所在句子与参考译文
+            if res.sentence:
+                escaped_sent = html.escape(res.sentence)
+                escaped_term = html.escape(res.term.strip())
+                if escaped_term:
+                    pattern = re.compile(re.escape(escaped_term), re.IGNORECASE)
+                    escaped_sent = pattern.sub(
+                        lambda m: f"<b style='color:#8C4212; background:#F6E3D2; padding:0 3px; border-radius:3px;'>{m.group(0)}</b>",
+                        escaped_sent,
+                    )
+                parts.append(
+                    f"<div style='margin-top:8px; padding:6px 9px; background:#F5EFEA; "
+                    f"border-radius:4px; font-size:12px; color:#334155;'>"
+                    f"<div><b>识别原句：</b>{escaped_sent}</div>"
+                    + (
+                        f"<div style='margin-top:3px; color:#526071;'><b>参考译文：</b>{html.escape(res.sentence_translation)}</div>"
+                        if res.sentence_translation
+                        else ""
+                    )
+                    + "</div>"
+                )
+
+            self.body_lbl.setText("".join(parts) or "无返回内容")
+            self.adjustSize()
+            return
+
+        self._apply_card_theme(False)
 
         # 状态徽章
         if res.just_resurrected:
@@ -433,6 +624,7 @@ class SelectionCoordinator:
         self.t_icon = FloatingTIcon()
         self.popup = TranslationPopup(on_open_review=on_open_review)
         self.t_icon.clicked.connect(self._on_t_icon_clicked)
+        self.t_icon.correction_clicked.connect(self._on_correction_icon_clicked)
 
         self._worker: Optional[TranslationWorker] = None
         self._was_lbutton_down = False
@@ -524,7 +716,25 @@ class SelectionCoordinator:
         if ctx is None or not ctx.selected_text.strip():
             return
 
-        self.popup.show_loading(icon_pos, ctx)
-        self._worker = TranslationWorker(ctx, self.storage, cfg)
+        self.popup.show_loading(icon_pos, ctx, mode="translate")
+        self._worker = TranslationWorker(ctx, self.storage, cfg, mode="translate")
+        self._worker.finished_result.connect(self.popup.render_result)
+        self._worker.start()
+
+    def _on_correction_icon_clicked(self, icon_pos: QPoint) -> None:
+        cfg = load_config()
+        limit = int(cfg.get("sentence_word_limit", 50))
+        global_mode = bool(cfg.get("global_mode", False))
+
+        ctx = capture_selection(
+            sentence_word_limit=limit,
+            global_mode=global_mode,
+            for_correction=True,
+        )
+        if ctx is None or not ctx.selected_text.strip():
+            return
+
+        self.popup.show_loading(icon_pos, ctx, mode="correction")
+        self._worker = TranslationWorker(ctx, self.storage, cfg, mode="correction")
         self._worker.finished_result.connect(self.popup.render_result)
         self._worker.start()

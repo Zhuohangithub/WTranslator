@@ -11,7 +11,7 @@ from storage import VocabStorage
 
 @dataclass
 class TranslationResult:
-    mode: str  # 'word' | 'phrase' | 'phrase_non_fixed' | 'sentence' | 'error'
+    mode: str  # 'word' | 'phrase' | 'phrase_non_fixed' | 'sentence' | 'correction' | 'error'
     term: str
     phonetic: str = ""
     meanings: List[Dict[str, str]] = field(default_factory=list)
@@ -26,6 +26,10 @@ class TranslationResult:
     just_resurrected: bool = False
     stored: bool = False
     error_msg: str = ""
+    is_appropriate: bool = True
+    verdict: str = ""
+    correction_analysis: str = ""
+    alternatives: List[Dict[str, str]] = field(default_factory=list)
 
 
 def _parse_json_object(raw: str) -> Dict[str, Any]:
@@ -206,17 +210,121 @@ class LLMService:
         sys_prompt = "你是专业英汉翻译专家。请直接将用户提供的英文句子或段落翻译为自然、准确、地道的中文，不要输出多余的解释。"
         return self._chat(sys_prompt, text, json_mode=False).strip()
 
+    def query_correction(self, term: str, sentence: str = "") -> Dict[str, Any]:
+        """
+        【纠错模式接口】
+        结合所选词所在句子，判断在此处使用是否合适（语义、搭配、语法形式、语体色彩），
+        并且不论合适与否，均给出可在该句中替换使用的可替代词。不存入单词本。
+        """
+        sys_prompt = (
+            "你是资深英语写作纠错与选词润色专家。用户会划选一个词或短语（并提供其所在的完整句子），"
+            "请你判断所选词在此句子中使用是否合适（包括词义准确性、固定搭配、词性与语法屈折、语体正式度等），"
+            "并且**不论在此使用合适与否，都必须给出 3~5 个适用于该句语境的可替代词或表达**。\n"
+            "请严格输出 JSON 格式，不要输出任何额外解释：\n"
+            "{\n"
+            '  "is_appropriate": true 或 false,\n'
+            '  "verdict": "简短结论（如：使用合适 / 搭配不当 / 词义偏差 / 语法形式有误 / 语体欠佳）",\n'
+            '  "analysis": "详细说明该词在句中使用是否得当及具体原因；若不合适请说明问题所在与修改建议",\n'
+            '  "alternatives": [\n'
+            '    {"word": "可替代词或短语（保持适配原句的词形）", "meaning": "中文释义及替换后的语境说明或优势"}\n'
+            "  ],\n"
+            '  "sentence_translation": "所在句子的自然中文翻译（若未提供句子则填 \\"\\"）"\n'
+            "}"
+        )
+        if sentence:
+            user_prompt = f"所选词：{term}\n所在句子：{sentence}"
+        else:
+            user_prompt = f"所选词：{term}\n（未提取到外部句子，请判断该词/表达本身用法是否恰当，并给出同义可替代词）"
+
+        raw = self._chat(sys_prompt, user_prompt, json_mode=True)
+        parsed = _parse_json_object(raw)
+
+        raw_alts = parsed.get("alternatives") or []
+        norm_alts: List[Dict[str, str]] = []
+        if isinstance(raw_alts, list):
+            for item in raw_alts:
+                if isinstance(item, dict):
+                    w = str(
+                        item.get("word")
+                        or item.get("term")
+                        or item.get("replacement")
+                        or ""
+                    ).strip()
+                    m = str(
+                        item.get("meaning")
+                        or item.get("note")
+                        or item.get("reason")
+                        or ""
+                    ).strip()
+                    if w:
+                        norm_alts.append({"word": w, "meaning": m})
+                elif isinstance(item, str) and item.strip():
+                    norm_alts.append({"word": item.strip(), "meaning": ""})
+
+        is_app = bool(parsed.get("is_appropriate", True))
+        verdict = str(parsed.get("verdict") or ("使用合适" if is_app else "建议替换"))
+        return {
+            "is_appropriate": is_app,
+            "verdict": verdict,
+            "analysis": str(parsed.get("analysis") or ""),
+            "alternatives": norm_alts,
+            "sentence_translation": str(parsed.get("sentence_translation") or ""),
+        }
+
+
+def process_correction(
+    ctx: SelectionContext,
+    cfg: Dict[str, Any],
+) -> TranslationResult:
+    """
+    纠错模式编排器：
+    自动结合所选词与所在句子，判断在此处使用是否合适，不论合适与否都给出可替代词。
+    在该功能中绝不存单词到单词本 (stored=False)。
+    """
+    llm = LLMService(
+        api_key=cfg.get("api_key", ""),
+        base_url=cfg.get("base_url", ""),
+        model=cfg.get("model", ""),
+    )
+    try:
+        sentence = ctx.sentence or (
+            ctx.selected_text if ctx.selection_type == "sentence" else ""
+        )
+        res = llm.query_correction(ctx.selected_text, sentence)
+        return TranslationResult(
+            mode="correction",
+            term=ctx.selected_text,
+            sentence=sentence,
+            sentence_translation=res["sentence_translation"],
+            is_appropriate=res["is_appropriate"],
+            verdict=res["verdict"],
+            correction_analysis=res["analysis"],
+            alternatives=res["alternatives"],
+            stored=False,
+        )
+    except Exception as exc:
+        return TranslationResult(
+            mode="error",
+            term=ctx.selected_text,
+            error_msg=str(exc),
+            stored=False,
+        )
+
 
 def process_selection(
     ctx: SelectionContext,
     storage: VocabStorage,
     cfg: Dict[str, Any],
+    mode: str = "translate",
 ) -> TranslationResult:
     """
     核心翻译与存储编排器：
     根据取词结果（单词 / 短语 / 句子）及本地数据库状态（新词 / 重复划词增量更新 / 软删除回归），
-    自动调用对应 AI 接口并完成结构化存储。
+    自动调用对应 AI 接口并完成结构化存储。若 mode=='correction' 则执行纠错模式且不存单词本。
     """
+    if mode == "correction":
+        return process_correction(ctx, cfg)
+
     llm = LLMService(
         api_key=cfg.get("api_key", ""),
         base_url=cfg.get("base_url", ""),

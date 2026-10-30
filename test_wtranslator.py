@@ -392,5 +392,133 @@ def test_custom_data_dir_migration(tmp_path: Path, monkeypatch):
     assert store.get_by_term("resilient") is not None
 
 
+def test_correction_mode_flow_and_ui(tmp_path: Path):
+    import sys
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication
+    from ui_floating import FloatingTIcon, TranslationPopup
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    db_file = tmp_path / "test_corr.db"
+    storage = VocabStorage(db_path=db_file)
+    cfg = {"api_key": "test-key", "base_url": "https://api.example.com/v1", "model": "test"}
+
+    with patch.object(LLMService, "query_correction") as mock_corr:
+        # 场景 1：原词在句中使用不合适 -> 判断不合适 + 给出可替代词 + 不入单词本
+        mock_corr.return_value = {
+            "is_appropriate": False,
+            "verdict": "搭配不当",
+            "analysis": "英语中表示『做研究』通常使用 conduct/do research，而不是 make research。",
+            "alternatives": [
+                {"word": "conduct", "meaning": "开展、进行（正式学术搭配）"},
+                {"word": "carry out", "meaning": "执行、开展（常用短语搭配）"},
+                {"word": "perform", "meaning": "执行、做（适用于实验或调研）"},
+            ],
+            "sentence_translation": "我们需要对这个课题开展进一步的研究。",
+        }
+        ctx_inappropriate = SelectionContext(
+            selected_text="make",
+            selection_type="word",
+            word_count=1,
+            sentence="We need to make further research on this topic.",
+            sentence_word_count=9,
+            sentence_over_limit=False,
+            sentence_limit=50,
+            source_app="word",
+        )
+        res_bad = process_selection(ctx_inappropriate, storage, cfg, mode="correction")
+        assert res_bad.mode == "correction"
+        assert res_bad.is_appropriate is False
+        assert res_bad.verdict == "搭配不当"
+        assert len(res_bad.alternatives) == 3
+        assert res_bad.stored is False
+        # 确认未存入单词本
+        assert storage.get_by_term("make") is None
+        assert len(storage.list_active_cards()) == 0
+        mock_corr.assert_called_once_with(
+            "make", "We need to make further research on this topic."
+        )
+
+        # 场景 2：原词在句中使用合适 -> 判断合适 + 依然给出可替代词 + 不入单词本
+        mock_corr.reset_mock()
+        mock_corr.return_value = {
+            "is_appropriate": True,
+            "verdict": "使用合适",
+            "analysis": "crucial 在此作表语形容词，准确表达了『至关重要的』，语法和语体均自然得体。",
+            "alternatives": [
+                {"word": "vital", "meaning": "至关重要的（强调不可或缺）"},
+                {"word": "essential", "meaning": "必不可少的、核心的"},
+                {"word": "pivotal", "meaning": "关键性的、中枢性的（学术书面语）"},
+            ],
+            "sentence_translation": "数据质量对于训练出可靠的模型至关重要。",
+        }
+        ctx_appropriate = SelectionContext(
+            selected_text="crucial",
+            selection_type="word",
+            word_count=1,
+            sentence="Data quality is crucial for training a reliable model.",
+            sentence_word_count=9,
+            sentence_over_limit=False,
+            sentence_limit=50,
+            source_app="word",
+        )
+        res_good = process_selection(ctx_appropriate, storage, cfg, mode="correction")
+        assert res_good.mode == "correction"
+        assert res_good.is_appropriate is True
+        assert len(res_good.alternatives) == 3
+        assert res_good.stored is False
+        assert storage.get_by_term("crucial") is None
+        assert len(storage.list_active_cards()) == 0
+
+    # 验证悬浮双框：右侧橙色框在原半透明框右边，且点击分别触发对应信号
+    t_icon = FloatingTIcon()
+    assert t_icon._right_rect.left() > t_icon._left_rect.right()
+
+    clicked_modes = []
+    t_icon.clicked.connect(lambda p: clicked_modes.append("translate"))
+    t_icon.correction_clicked.connect(lambda p: clicked_modes.append("correction"))
+
+    t_icon.show_near(QPoint(200, 200), 0.78)
+    # 点击左侧原半透明框
+    ev_left = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(16, 16),
+        QPointF(216, 216),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    t_icon.mousePressEvent(ev_left)
+    assert clicked_modes == ["translate"]
+
+    # 点击右侧橙色半透明框
+    t_icon.show_near(QPoint(200, 200), 0.78)
+    ev_right = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(55, 16),
+        QPointF(255, 216),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    t_icon.mousePressEvent(ev_right)
+    assert clicked_modes == ["translate", "correction"]
+
+    # 验证弹窗渲染纠错结果
+    popup = TranslationPopup()
+    vocab_events = []
+    popup.vocab_updated.connect(lambda: vocab_events.append(1))
+    popup.show_loading(QPoint(220, 220), ctx_inappropriate, mode="correction")
+    assert "纠错模式" in popup.badge_lbl.text()
+    popup.render_result(res_bad)
+    assert "搭配不当" in popup.body_lbl.text()
+    assert "conduct" in popup.body_lbl.text()
+    assert "可替代词推荐" in popup.body_lbl.text()
+    assert len(vocab_events) == 0
+    popup.hide()
+
+
+
 
 

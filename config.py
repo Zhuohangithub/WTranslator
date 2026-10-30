@@ -68,10 +68,10 @@ def get_current_version() -> str:
         if v_file.exists():
             try:
                 data = json.loads(v_file.read_text(encoding="utf-8"))
-                return str(data.get("version", "1.0.2"))
+                return str(data.get("version", "1.0.3"))
             except Exception:
                 pass
-    return "1.0.2"
+    return "1.0.3"
 
 
 def load_config(force_reload: bool = False) -> Dict[str, Any]:

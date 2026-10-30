@@ -158,12 +158,16 @@ class WTranslatorApp:
         self.review_window.raise_()
         self.review_window.activateWindow()
 
-    def trigger_context_popup(self, ctx: SelectionContext) -> None:
-        """供『模拟划词』直接调用悬浮翻译弹窗。"""
+    def trigger_context_popup(
+        self, ctx: SelectionContext, mode: str = "translate"
+    ) -> None:
+        """供『模拟划词』直接调用悬浮翻译或纠错弹窗。"""
         cfg = load_config()
         pos = QCursor.pos() - QPoint(180, 40)
-        self.coordinator.popup.show_loading(pos, ctx)
-        self.coordinator._worker = TranslationWorker(ctx, self.storage, cfg)
+        self.coordinator.popup.show_loading(pos, ctx, mode=mode)
+        self.coordinator._worker = TranslationWorker(
+            ctx, self.storage, cfg, mode=mode
+        )
         self.coordinator._worker.finished_result.connect(self.coordinator.popup.render_result)
         self.coordinator._worker.start()
 

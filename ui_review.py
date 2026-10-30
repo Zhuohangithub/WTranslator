@@ -680,11 +680,18 @@ class ManualTestDialog(QDialog):
         run_btn.setStyleSheet(
             "background: #486380; color: white; font-weight: bold; padding: 6px 16px; border-radius: 6px;"
         )
-        run_btn.clicked.connect(self._on_run)
+        run_btn.clicked.connect(lambda: self._on_run("translate"))
         btn_row.addWidget(run_btn)
+
+        corr_btn = QPushButton("触发橙色纠错模式弹窗")
+        corr_btn.setStyleSheet(
+            "background: #D67026; color: white; font-weight: bold; padding: 6px 16px; border-radius: 6px;"
+        )
+        corr_btn.clicked.connect(lambda: self._on_run("correction"))
+        btn_row.addWidget(corr_btn)
         layout.addLayout(btn_row)
 
-    def _on_run(self) -> None:
+    def _on_run(self, mode: str = "translate") -> None:
         sel = self.sel_edit.text().strip()
         sent = self.sent_edit.text().strip()
         if not sel:
@@ -693,7 +700,7 @@ class ManualTestDialog(QDialog):
         limit = int(cfg.get("sentence_word_limit", 50))
         sel_type, w_cnt = classify_selection(sel)
         s_cnt = count_words(sent) if sent else 0
-        over = s_cnt > limit
+        over = False if mode == "correction" else (s_cnt > limit)
 
         ctx = SelectionContext(
             selected_text=sel,
@@ -706,7 +713,10 @@ class ManualTestDialog(QDialog):
             source_app="word",
         )
         self.accept()
-        self.on_trigger_context(ctx)
+        try:
+            self.on_trigger_context(ctx, mode)
+        except TypeError:
+            self.on_trigger_context(ctx)
 
 
 class ReviewMainWindow(QMainWindow):
@@ -821,7 +831,8 @@ class ReviewMainWindow(QMainWindow):
 
         # 状态说明副标题
         hint_bar = QLabel(
-            "<b>使用说明：</b>在 Word 中划词后点击半透明 <b>T</b> 图标即可查词并自动收录。"
+            "<b>使用说明：</b>在 Word 中划词后，点击左侧半透明 <b>T</b> 图标即可查词并自动收录；"
+            "点击右侧<b>橙色半透明 C 框（纠错模式）</b>可自动识别所在句子、判断用词是否合适并给出可替代词（不存单词本）。"
             "点击下方<b>卡片任意区域</b>代表已复习一次；超过 7 天未复习会变为<b>暗红色卡片框</b>；"
             "删除卡片后若再次划到该词，将以<b>暗黄色卡片框（又回来啦）</b>重新回归。"
         )
